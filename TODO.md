@@ -34,10 +34,10 @@
 ## 🐍 BACKEND
 
 ### B1. Proyecto base FastAPI
-- [ ] `uv init` en `backend/` y revisar el `pyproject.toml` generado
-- [ ] Añadir dependencias: `fastapi`, `uvicorn[standard]`
-- [ ] Crear `app/main.py` con un endpoint `GET /health`
-- [ ] Arrancar con `uv run uvicorn app.main:app --reload`
+- [X] `uv init` en `backend/` y revisar el `pyproject.toml` generado
+- [X] Añadir dependencias: `fastapi`, `uvicorn[standard]`
+- [X] Crear `src/backend/main.py` con un endpoint `GET /health`
+- [X] Arrancar con `uv run uvicorn backend.main:app --reload` (desde `backend/`)
 - [ ] Explorar la documentación automática en `/docs` (Swagger) y `/redoc`
 - [ ] Ver el esquema crudo en `/openapi.json`
 

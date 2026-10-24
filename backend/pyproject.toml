@@ -1,13 +1,16 @@
 [project]
 name = "backend"
 version = "0.1.0"
-description = "Add your description here"
+description = "Proyecto de aprendizaje gastos"
 readme = "README.md"
 authors = [
     { name = "Luis", email = "qfluis@gmail.com" }
 ]
-requires-python = ">=3.10"
-dependencies = []
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.162.0",
+    "uvicorn[standard]>=0.54.0",
+]
 
 [project.scripts]
 backend = "backend:main"

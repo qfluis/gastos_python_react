@@ -1,8 +1,10 @@
-# Puesta en marcha entorno
+# Apuntes
 
-## Python
+## Puesta en marcha entorno / Instalaciones
 
-### uv
+### Python
+
+#### uv
 
 **Qué es:** gestor de proyectos y paquetes de Python (de Astral, los de Ruff), escrito en Rust. Sustituye a `pyenv`, `venv`, `pip`, `pip-tools`/Poetry y `pipx`, y es mucho más rápido.
 
@@ -24,13 +26,13 @@ uv --version                                      # comprobar
 - En **local**: se decide qué versiones usar (`uv add` → `uv.lock` → git) y el editor usa el `.venv`.
 - En el **contenedor**: solo se reproduce lo que dice el lock → `uv sync --frozen`.
 
-## Node.js
+### Node.js
 
-### Versiones: LTS vs. actual
+#### Versiones: LTS vs. actual
 - Las versiones **pares** (20, 22, 24…) pasan a **LTS** (*Long Term Support*): unos 30 meses de soporte. Son las que se usan en proyectos.
 - Las **impares** (19, 21, 23…) duran solo unos 6 meses y nunca llegan a LTS. No conviene usarlas.
 
-### fnm (gestor de versiones de Node)
+#### fnm (gestor de versiones de Node)
 
 **Qué es:** el equivalente a `uv python` en el mundo Node. Instala y cambia entre versiones de Node sin `sudo` ni tocar el sistema. Está escrito en Rust y es rápido. La alternativa clásica es `nvm` (en bash, más lento, pero igual de válido).
 
@@ -64,9 +66,9 @@ node --version > .node-version   # se versiona en git
 
 **Node antiguo instalado con apt:** fnm tiene prioridad en el `PATH`, así que no molesta. Para eliminarlo: `sudo apt remove nodejs` (y quitar el repositorio de NodeSource de `/etc/apt/sources.list.d/` si existe).
 
-## Docker
+### Docker
 
-### Docker Engine + Docker Compose
+#### Docker Engine + Docker Compose
 
 **Qué es:**
 - **Docker Engine:** el motor que construye imágenes y ejecuta contenedores. Incluye el demonio `dockerd` y la CLI `docker`.
@@ -109,9 +111,9 @@ docker run --rm hello-world   # sin sudo
 id -nG | grep docker          # el usuario debe estar en el grupo
 ```
 
-## VS Code
+### VS Code
 
-### Extensiones VSC
+#### Extensiones VSC
 
 | Extensión | ID | Para qué sirve |
 |---|---|---|
@@ -132,4 +134,65 @@ code --install-extension ms-azuretools.vscode-docker
 - También desde la vista de extensiones (`Ctrl+Shift+X`) buscando el nombre o el ID.
 - Comprobar: `code --list-extensions`
 
-# Backend
+## Backend
+
+### Iniciar el proyecto (FastAPI + uv)
+
+**1. Crear el proyecto con uv:**
+```bash
+cd backend
+uv init    # estructura src/: src/backend/__init__.py + [build-system] en pyproject.toml
+```
+- En uv 0.13, `uv init` sin opciones ya crea el layout `src/` y el código se instala como paquete importable (`backend`). Equivale a `uv init --package`.
+- `uv init --no-package` crea una **app** plana (`main.py` en la raíz, sin `[build-system]`).
+- `uv init --lib` es para librerías que se publican, no para una API.
+- Hay que fijarse en lo que genera, porque el comportamiento por defecto ha cambiado entre versiones de uv.
+
+**Ficheros generados:**
+- `pyproject.toml`: nombre, versión, Python requerido y dependencias del proyecto.
+- `.python-version`: versión de Python que usará uv en esta carpeta.
+- `README.md` y `src/backend/__init__.py`.
+- `.venv/` y `uv.lock` **no** aparecen hasta el primer `uv add`, `uv sync` o `uv run`. El `uv.lock` se versiona en git y el `.venv/` no.
+
+**2. Fijar la versión de Python** (si `uv init` cogió la del sistema):
+```bash
+uv python install 3.13
+uv python pin 3.13          # reescribe .python-version
+```
+- Ajustar también `requires-python = ">=3.13"` en `pyproject.toml` para que coincida.
+
+**3. Añadir dependencias:**
+```bash
+uv add fastapi "uvicorn[standard]"
+```
+- **fastapi**: el framework (rutas, validación con Pydantic, OpenAPI automático).
+- **uvicorn**: el servidor ASGI que ejecuta la app. `[standard]` añade extras más rápidos (`uvloop`, `httptools`) y la recarga automática.
+- Crea `.venv/`, instala todo y actualiza `pyproject.toml` y `uv.lock`.
+
+**4. Crear la app** en `src/backend/main.py`:
+```python
+from fastapi import FastAPI
+
+app = FastAPI(title="Gastos API")
+
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    return {"status": "ok"}
+```
+
+**5. Arrancar en desarrollo:**
+```bash
+uv run uvicorn backend.main:app --reload
+```
+- `backend.main:app` → módulo `backend/main.py`, variable `app`.
+- `--reload` reinicia el servidor al guardar un `.py`. Es solo para desarrollo.
+- Por defecto escucha en `http://127.0.0.1:8000`.
+
+**Comprobar:**
+- `http://127.0.0.1:8000/health` → `{"status": "ok"}`
+- `http://127.0.0.1:8000/docs` → Swagger UI (probar endpoints desde el navegador)
+- `http://127.0.0.1:8000/redoc` → documentación alternativa
+- `http://127.0.0.1:8000/openapi.json` → esquema OpenAPI en crudo
+
+**VS Code:** `Ctrl+Shift+P` → *Python: Select Interpreter* → `backend/.venv/bin/python`, para que Pylance reconozca `fastapi`.
