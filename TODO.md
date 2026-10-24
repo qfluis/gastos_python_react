@@ -11,11 +11,11 @@
 
 ## 0. Preparación del entorno
 
-- [ ] Instalar **uv** y comprobar `uv --version`
-- [ ] Instalar **Node.js LTS** (recomendado vía `nvm` o `fnm`)
-- [ ] Instalar **Docker Engine** + plugin **Docker Compose**; añadir tu usuario al grupo `docker`
-- [ ] Instalar extensiones VS Code: Python, Ruff, ESLint, Prettier, Docker
-- [ ] Definir estructura de monorepo:
+- [X] Instalar **uv** y comprobar `uv --version`
+- [X] Instalar **Node.js LTS** (recomendado vía `nvm` o `fnm`)
+- [X] Instalar **Docker Engine** + plugin **Docker Compose**; añadir tu usuario al grupo `docker`
+- [X] Instalar extensiones VS Code: Python, Ruff, ESLint, Prettier, Docker
+- [X] Definir estructura de monorepo:
   ```
   backend/
   frontend/

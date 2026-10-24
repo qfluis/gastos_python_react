@@ -1,0 +1,69 @@
+# ============================================================
+# Secretos y variables de entorno
+# ============================================================
+# Nunca se versionan: contienen credenciales.
+.env
+.env.*
+# ...salvo la plantilla, que sí va a git para documentar qué variables hacen falta.
+!.env.example
+
+# ============================================================
+# Python (backend)
+# ============================================================
+# Entorno virtual que crea uv (se regenera con `uv sync`).
+.venv/
+
+# Bytecode compilado que Python genera al importar módulos.
+__pycache__/
+*.py[cod]
+
+# Cachés de herramientas de desarrollo.
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Informes de cobertura de tests.
+.coverage
+.coverage.*
+htmlcov/
+
+# Artefactos de empaquetado.
+build/
+*.egg-info/
+
+# OJO: `uv.lock` NO se ignora; fija las versiones exactas y debe ir a git.
+
+# ============================================================
+# Node / React (frontend)
+# ============================================================
+# Dependencias instaladas (se regeneran con `npm install`).
+node_modules/
+
+# Build de producción de Vite.
+dist/
+
+# Logs de npm/yarn/pnpm cuando algo falla.
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Caché de despliegue de Firebase Hosting.
+.firebase/
+
+# OJO: `package-lock.json` NO se ignora; igual que uv.lock, va a git.
+
+# ============================================================
+# Editor y sistema operativo
+# ============================================================
+# Configuración personal de VS Code; si algún día quieres compartir
+# settings del proyecto, añade excepciones con `!.vscode/settings.json`.
+.vscode/
+
+# Ficheros basura del sistema.
+.DS_Store
+Thumbs.db
+*.swp
+
+# Logs genéricos.
+*.log
