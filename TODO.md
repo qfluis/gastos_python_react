@@ -58,10 +58,10 @@
 - `TestClient` de FastAPI: cómo se prueba una API sin levantar servidor
 
 ### B3. Configuración y estructura
-- [ ] Añadir `pydantic-settings` y crear `app/core/config.py`
-- [ ] Leer `DATABASE_URL`, `ENVIRONMENT`, etc. desde variables de entorno / `.env`
-- [ ] Crear `.env.example` (versionado) y `.env` (ignorado)
-- [ ] Organizar carpetas por capas:
+- [X] Añadir `pydantic-settings` y crear `app/core/config.py`
+- [X] Leer `DATABASE_URL`, `ENVIRONMENT`, etc. desde variables de entorno / `.env`
+- [X] Crear `.env.example` (versionado) y `.env` (ignorado)
+- [X] Organizar carpetas por capas:
   ```
   app/
     api/        # routers (endpoints)
