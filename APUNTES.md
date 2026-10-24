@@ -676,3 +676,36 @@ docker compose down -v         # ídem + borrar volúmenes
 - **`port is already allocated`**: algo del host ya usa ese puerto (p. ej. un `uvicorn` local en el 8000). Pararlo, o cambiar el puerto del host en `ports:`.
 - **Añadí una dependencia y la API no la encuentra**: falta reconstruir → `docker compose up -d --build`.
 - **No recarga al guardar**: comprobar en `logs -f api` que sale `Will watch for changes` y que el fichero está dentro de `src/` (lo único montado).
+
+### Base de datos: SQLAlchemy + Alembic
+
+**Objetivo:** que la API guarde y lea datos en PostgreSQL usando clases Python (ORM) en vez de SQL a mano, y que los cambios en las tablas queden versionados como migraciones.
+
+#### Dependencias
+```bash
+uv add sqlalchemy "psycopg[binary]" alembic   # desde backend/
+```
+- **sqlalchemy**: el **ORM**. Traduce clases Python ↔ tablas y objetos ↔ filas. También gestiona el **pool de conexiones** (el `engine`).
+- **psycopg** (v3): el **driver**, lo que de verdad habla con Postgres por la red. SQLAlchemy no se conecta solo, delega en él.
+  - Por eso la URL es `postgresql+psycopg://...`: el `+psycopg` le dice a SQLAlchemy qué driver usar.
+  - `[binary]` trae `libpq` (la librería C de Postgres) ya compilada. No hay que instalar nada en el sistema ni en la imagen `slim`.
+  - Las comillas en `"psycopg[binary]"` evitan que la shell interprete los corchetes.
+- **alembic**: **migraciones**. Guarda cada cambio de esquema como un fichero versionado con `upgrade()` y `downgrade()`. Es del mismo autor que SQLAlchemy. Arrastra `mako`, el motor de plantillas con el que genera esos ficheros.
+- Las tres son de **producción** (sin `--dev`): la app necesita el ORM y el driver para funcionar, y Alembic se ejecutará en la nube para migrar la BD (Cloud Run Job).
+
+**Comprobar la conexión** (con el Postgres de Compose levantado):
+```bash
+uv run python -c "
+from sqlalchemy import create_engine, text
+from backend.core.config import get_settings
+engine = create_engine(get_settings().database_url)
+with engine.connect() as conn:
+    print(conn.execute(text('select version()')).scalar())
+"
+# PostgreSQL 17.x ...
+```
+
+**No olvidar:** dependencias nuevas → reconstruir la imagen de la API, porque el `.venv` vive dentro de ella (el bind mount solo trae `src/`):
+```bash
+docker compose up -d --build
+```

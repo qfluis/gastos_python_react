@@ -84,8 +84,8 @@
   - [X] `api` → build target `dev`, bind mount del código, `--reload`
   - [X] (Opcional) `adminer` para ver la BD desde el navegador
 - [X] Añadir `healthcheck` a `db` y `depends_on: condition: service_healthy` en `api`
-- [ ] Comprobar que al guardar un `.py` el contenedor recarga
-- [ ] Practicar comandos: `up`, `down`, `logs -f`, `exec`, `down -v`
+- [X] Comprobar que al guardar un `.py` el contenedor recarga
+- [X] Practicar comandos: `up`, `down`, `logs -f`, `exec`, `down -v`
 
 🎓 **Entender**
 - Capas de una imagen y por qué el orden de instrucciones afecta a la caché
