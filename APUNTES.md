@@ -199,3 +199,128 @@ uv run uvicorn backend.main:app --reload
 
 ### Calidad del código
 
+
+**Dependencias de producción vs. de desarrollo:**
+- **Producción** (`uv add paquete`) → van a `[project].dependencies`. La app las necesita para funcionar (`fastapi`, `uvicorn`).
+- **Desarrollo** (`uv add --dev paquete`) → van a `[dependency-groups].dev`. Solo se usan mientras se programa (`ruff`, `pytest`…). La imagen de producción no las instala (`uv sync --no-dev`), así queda más pequeña.
+
+#### Ruff (linter + formateador)
+
+**Qué es:** herramienta de Astral (los de uv), escrita en Rust. Hace dos cosas:
+- **Linter** (`ruff check`): busca errores y malas prácticas (imports sin usar, variables no definidas, bugs típicos…). Sustituye a Flake8, isort, pyupgrade…
+- **Formateador** (`ruff format`): deja el código con un estilo uniforme. Es compatible con Black.
+
+**1. Instalar:**
+```bash
+uv add --dev ruff
+```
+
+**2. Configurar** en `pyproject.toml` (secciones `[tool.ruff]`):
+```toml
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "N", "UP", "B", "SIM", "C4", "RUF", "FAST"]
+ignore = ["E501"]
+```
+- `select` elige qué familias de reglas se activan. Cada letra es un plugin (`F` = Pyflakes, `I` = isort, `B` = bugbear, `FAST` = reglas de FastAPI…).
+- `E501` (línea demasiado larga) se ignora porque ya lo resuelve el formateador.
+- `extend-immutable-calls` en `[tool.ruff.lint.flake8-bugbear]` evita que ruff se queje de `Depends(...)` como valor por defecto, que en FastAPI es lo normal.
+
+**3. Usar:**
+```bash
+uv run ruff check .          # muestra los problemas
+uv run ruff check --fix .    # corrige los que se pueden arreglar solos
+uv run ruff format .         # formatea el código
+uv run ruff format --check . # solo comprueba, no toca nada (útil en CI)
+```
+- La extensión **Ruff** de VS Code usa la misma configuración del `pyproject.toml`, así que los avisos del editor coinciden con los de la terminal.
+
+#### Tests: pytest + httpx2
+
+**Qué es:**
+- **pytest**: el framework de tests estándar en Python. Busca archivos `test_*.py`, ejecuta las funciones `test_*` y comprueba los `assert`.
+- **httpx2**: cliente HTTP que usa por debajo el `TestClient` de FastAPI. Hace falta instalarlo aunque no se importe directamente.
+- Se usa **`httpx2`** y no `httpx`: con `httpx`, Starlette (la base de FastAPI) avisa de que está obsoleto (`StarletteDeprecationWarning`).
+
+**1. Instalar:**
+```bash
+uv add --dev pytest httpx2
+```
+
+**2. Configurar** en `pyproject.toml`:
+```toml
+[tool.pytest.ini_options]
+testpaths = ["tests"]   # buscar tests solo en tests/ (no recorre .venv)
+addopts = "-ra"         # resumen final de tests fallidos/saltados
+```
+
+**3. Escribir el test** en `backend/tests/test_health.py`:
+```python
+from fastapi.testclient import TestClient
+
+from backend.main import app
+
+client = TestClient(app)
+
+
+def test_health_devuelve_ok() -> None:
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+```
+- La carpeta `tests/` va **fuera** de `src/`: los tests no forman parte del paquete que se instala.
+- `from backend.main import app` funciona porque uv instala el proyecto como paquete en el `.venv`.
+
+**4. Ejecutar** (desde `backend/`):
+```bash
+uv run pytest        # resumen con un punto por test
+uv run pytest -v     # nombre de cada test
+uv run pytest -k health   # solo los tests cuyo nombre contiene "health"
+```
+
+**`TestClient`: probar la API sin levantar servidor:**
+- No arranca uvicorn ni abre puertos. Llama a la app ASGI **directamente en memoria** y devuelve una respuesta igual que si fuera una petición HTTP real.
+- Por eso los tests son rápidos y no dependen de que haya un servidor corriendo.
+
+#### pre-commit (ruff antes de cada commit)
+
+**Qué es:** herramienta que gestiona los *git hooks*, scripts que git ejecuta automáticamente en ciertos momentos. Con el hook `pre-commit`, ruff revisa el código **antes** de que se guarde el commit, y si algo falla el commit no se hace.
+
+**1. Instalar:**
+```bash
+uv add --dev pre-commit
+```
+
+**2. Configurar** en `.pre-commit-config.yaml`, **en la raíz del repo** (git trabaja a nivel de repositorio, no de carpeta):
+```yaml
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.2 # misma versión que ruff en backend/uv.lock
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+        files: ^backend/
+      - id: ruff-format
+        files: ^backend/
+```
+- `files: ^backend/` → los hooks solo miran archivos del backend. Más adelante se pueden añadir hooks para el frontend en el mismo archivo.
+- pre-commit descarga **su propia copia** de ruff (la del `rev`), así que al actualizar ruff en `uv.lock` hay que cambiar también el `rev`. Si no, el editor y el hook podrían aplicar reglas distintas.
+
+**3. Activar el hook** (una vez por cada clon del repo):
+```bash
+cd backend
+uv run pre-commit install           # crea .git/hooks/pre-commit
+uv run pre-commit run --all-files   # pasarlo a mano sobre todo el código
+```
+- `.git/hooks/` no se sube a git: quien clone el repo tiene que hacer `pre-commit install`.
+
+**Qué pasa al hacer `git commit`:**
+- Todo bien → el commit se hace normal.
+- Ruff corrige algo → el commit **se para** (`Failed - files were modified by this hook`) y deja los archivos ya corregidos. Se revisan los cambios, `git add` y se repite el commit.
+- Error que ruff no puede arreglar solo → lo muestra y el commit se para.
+- `git commit --no-verify` se salta los hooks. Solo para casos puntuales.
