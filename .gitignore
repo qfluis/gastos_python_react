@@ -67,3 +67,8 @@ Thumbs.db
 
 # Logs genéricos.
 *.log
+
+
+# Ficheros epub generados a partir de los MDs
+*.epub
+*.azw3

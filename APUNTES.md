@@ -324,3 +324,158 @@ uv run pre-commit run --all-files   # pasarlo a mano sobre todo el código
 - Ruff corrige algo → el commit **se para** (`Failed - files were modified by this hook`) y deja los archivos ya corregidos. Se revisan los cambios, `git add` y se repite el commit.
 - Error que ruff no puede arreglar solo → lo muestra y el commit se para.
 - `git commit --no-verify` se salta los hooks. Solo para casos puntuales.
+
+### Configuración y estructura
+
+#### 12-Factor App: la configuración va en el entorno
+
+**Qué es:** *The Twelve-Factor App* es un conjunto de buenas prácticas para apps que se despliegan en la nube. El factor III dice que la **configuración** (lo que cambia entre local, test y producción: URL de la BD, claves, modo…) se lee de **variables de entorno**, no se escribe en el código.
+
+**Por qué:**
+- El mismo código (y la misma imagen Docker) sirve para todos los entornos; solo cambian las variables.
+- Los secretos no acaban en git.
+- Cloud Run, Docker Compose y GitHub Actions saben pasar variables de entorno, así que no hace falta nada especial.
+
+#### pydantic-settings
+
+**Qué es:** extensión de Pydantic que lee la configuración de variables de entorno (y de un `.env`) y la **valida y convierte de tipo** igual que un modelo Pydantic.
+
+**1. Instalar** (dependencia de producción, la app la necesita para arrancar):
+```bash
+cd backend
+uv add pydantic-settings
+```
+
+**2. Crear** `src/backend/core/config.py`:
+```python
+from functools import lru_cache
+from typing import Literal
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",  # relativo al directorio desde el que se arranca (backend/)
+        env_file_encoding="utf-8",
+        extra="ignore",  # el .env puede tener variables para otros (p. ej. Postgres)
+    )
+
+    # Sin valor por defecto -> obligatoria: si falta, la app no arranca.
+    database_url: str
+
+    # Con valor por defecto -> opcional. Literal limita los valores válidos.
+    environment: Literal["development", "test", "production"] = "development"
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()  # type: ignore[call-arg]
+```
+- Cada atributo se rellena con la variable de entorno del mismo nombre, **sin distinguir mayúsculas**: `database_url` ← `DATABASE_URL`.
+- **Campo sin valor por defecto = obligatorio.** Si falta, salta un `ValidationError` al arrancar. Es mejor fallar pronto que en la primera consulta a la BD.
+- **`Literal[...]`** solo admite esos valores: `ENVIRONMENT=staging` da error.
+- **Prioridad:** las variables de entorno del sistema ganan al `.env`. Así Docker Compose o Cloud Run pueden sobrescribir lo que haya en el fichero.
+- **`extra="ignore"`:** por defecto, si el `.env` tiene variables que `Settings` no conoce, da error. Se cambia porque el mismo `.env` tendrá variables para el contenedor de Postgres.
+- **`get_settings()` con `@lru_cache`:** el `.env` se lee **una sola vez** y se reutiliza. Además no se lee al importar el módulo, sino al llamar a la función, y en los tests se puede sustituir por otra configuración. Es el patrón que recomienda la documentación de FastAPI.
+- **`# type: ignore[call-arg]`:** el editor cree que falta el argumento `database_url` porque no sabe que se lee del entorno.
+
+**3. Comprobar** (desde `backend/`):
+```bash
+uv run python -c "from backend.core.config import get_settings; print(get_settings())"
+# sin DATABASE_URL     → ValidationError: database_url  Field required
+# con DATABASE_URL     → database_url='postgresql+psycopg://...' environment='development'
+# ENVIRONMENT=staging  → ValidationError: Input should be 'development', 'test' or 'production'
+```
+
+#### `.env` y `.env.example`
+
+| Fichero | ¿Va a git? | Para qué |
+|---|---|---|
+| `.env.example` | **Sí** | Plantilla: documenta qué variables hacen falta, con valores de ejemplo (nunca secretos reales) |
+| `.env` | **No** | Valores reales de cada desarrollador/máquina |
+
+`backend/.env.example`:
+```dotenv
+# Conexión a PostgreSQL (obligatoria).
+# Formato: postgresql+psycopg://USUARIO:CONTRASEÑA@HOST:PUERTO/BASE_DE_DATOS
+DATABASE_URL=postgresql+psycopg://gastos:gastos@localhost:5432/gastos
+
+# Entorno de ejecución: development | test | production (opcional).
+ENVIRONMENT=development
+```
+- Va en `backend/` porque `env_file=".env"` es relativo a la carpeta desde la que se arranca uvicorn.
+- `+psycopg` le dice a SQLAlchemy qué driver usar (psycopg 3).
+- `localhost` sirve cuando uvicorn corre en local contra el Postgres de Compose. Si la API corre **dentro** de Compose, el host es `db` (lo pondrá `docker-compose.yml`).
+
+**Crear el `.env` propio:**
+```bash
+cd backend
+cp .env.example .env
+```
+
+**En `.gitignore`:**
+```gitignore
+.env
+.env.*
+# Excepción: la plantilla sí se versiona.
+!.env.example
+```
+- En `.gitignore` los comentarios van en su propia línea: un `#` al final de una regla se toma como parte del patrón.
+- Comprobar: `git check-ignore -v .env` debe mostrar la regla que lo ignora, y `git status` debe mostrar `.env.example` pero no `.env`.
+
+#### Estructura por capas
+
+```
+src/backend/
+  main.py        # crea la app y monta los routers
+  api/
+    routes/      # routers (endpoints), uno por recurso
+  core/          # config, seguridad
+  db/            # engine, sesión, base
+  models/        # modelos SQLAlchemy (tablas)
+  schemas/       # modelos Pydantic (entrada/salida de la API)
+  services/      # lógica de negocio
+```
+- Se sigue el layout `src/backend/` que creó `uv init`, en vez de `app/`: el paquete importable se llama `backend` (`from backend.core.config import get_settings`).
+- Cada carpeta lleva un **`__init__.py` vacío**: la convierte en paquete importable y, además, git no versiona carpetas vacías.
+```bash
+cd backend/src/backend
+for d in api api/routes db models schemas services; do mkdir -p $d && touch $d/__init__.py; done
+```
+
+**Modelos de BD (SQLAlchemy) vs. esquemas de API (Pydantic):**
+- **Modelo** (`models/`) = cómo se guarda un dato en la tabla: columnas, claves foráneas, relaciones.
+- **Esquema** (`schemas/`) = qué datos entran y salen por la API, y cómo se validan.
+- No son lo mismo: al crear un gasto no se envía `id` ni `created_at` (`ExpenseCreate`), al leerlo sí se devuelven (`ExpenseRead`), y en un futuro `User` la contraseña cifrada está en la tabla pero nunca debe salir por la API.
+- Separarlos permite cambiar la BD sin romper el contrato con el frontend, y al revés.
+
+#### Routers (`APIRouter`)
+
+**Qué es:** un `APIRouter` agrupa endpoints como si fuera una mini-app. No se ejecuta por sí solo; se monta en la app principal con `include_router`.
+
+`src/backend/api/routes/health.py`:
+```python
+from fastapi import APIRouter
+
+router = APIRouter(tags=["health"])
+
+
+@router.get("/health")
+def health() -> dict[str, str]:
+    return {"status": "ok"}
+```
+
+`src/backend/main.py`:
+```python
+from fastapi import FastAPI
+
+from backend.api.routes import health
+
+app = FastAPI(title="Gastos API")
+
+app.include_router(health.router)
+```
+- `tags=["health"]` agrupa los endpoints bajo ese título en `/docs`.
+- `main.py` queda solo para crear la app y montar routers. Los siguientes se añaden igual, con prefijo: `app.include_router(expenses.router, prefix="/expenses")`.
+- El test de `/health` no cambia: importa `app` desde `backend.main` y prueba la API desde fuera, sin importarle en qué fichero está el endpoint.
