@@ -1,0 +1,23 @@
+# Lo que NO se envía a Docker como contexto de build (ni puede acabar en la imagen con COPY . .).
+# Menos contexto = builds más rápidos, y se evita meter secretos o basura en la imagen.
+
+# Secretos: la configuración llega por variables de entorno, nunca horneada en la imagen.
+.env
+.env.*
+!.env.example
+
+# Entorno virtual local: tiene rutas y binarios del host; el contenedor crea el suyo.
+.venv/
+
+# Cachés y bytecode.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Los propios ficheros de Docker no hacen falta dentro de la imagen.
+Dockerfile
+.dockerignore

@@ -479,3 +479,200 @@ app.include_router(health.router)
 - `tags=["health"]` agrupa los endpoints bajo ese título en `/docs`.
 - `main.py` queda solo para crear la app y montar routers. Los siguientes se añaden igual, con prefijo: `app.include_router(expenses.router, prefix="/expenses")`.
 - El test de `/health` no cambia: importa `app` desde `backend.main` y prueba la API desde fuera, sin importarle en qué fichero está el endpoint.
+
+### Docker en desarrollo
+
+**Objetivo:** levantar Postgres + API con un solo comando (`docker compose up`), con el código montado desde el host para que al guardar un `.py` la API se recargue sola.
+
+**Ficheros:**
+```
+backend/Dockerfile      # cómo se construye la imagen de la API (dev y prod)
+backend/.dockerignore   # qué NO entra en la imagen
+docker-compose.yml      # servicios db + api + adminer (raíz del repo)
+```
+
+#### Imagen vs. contenedor (repaso)
+- **Imagen**: plantilla de solo lectura (sistema base + Python + dependencias + código). Se construye con `docker build` a partir de un `Dockerfile`.
+- **Contenedor**: una imagen **en ejecución**, con su propia capa de escritura encima. De una imagen salen tantos contenedores como se quiera.
+- Lo que se escribe dentro de un contenedor se pierde al borrarlo, salvo que vaya a un **volumen** o a un **bind mount**.
+
+#### Capas y caché
+- Cada instrucción del `Dockerfile` (`FROM`, `COPY`, `RUN`…) crea una **capa**. Docker las guarda en caché.
+- Al reconstruir, Docker reutiliza capas hasta llegar a la primera que cambia; **esa y todas las siguientes** se rehacen.
+- Por eso el orden importa: primero lo que cambia poco (dependencias), al final lo que cambia mucho (el código).
+
+Mal (cada cambio en un `.py` reinstala todas las dependencias):
+```dockerfile
+COPY . .
+RUN uv sync --locked
+```
+
+Bien (las dependencias solo se reinstalan si cambian `pyproject.toml` o `uv.lock`):
+```dockerfile
+RUN --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    uv sync --locked --no-install-project
+COPY . .
+RUN uv sync --locked
+```
+- `--mount=type=bind` hace visibles esos dos ficheros **solo durante ese `RUN`**, sin crear una capa con ellos.
+- `--mount=type=cache,target=/root/.cache/uv` guarda la caché de descargas de uv **entre builds**, sin meterla en la imagen.
+
+#### uv dentro de Docker
+- uv se copia desde su imagen oficial, con la misma versión que en local:
+```dockerfile
+COPY --from=ghcr.io/astral-sh/uv:0.13.5 /uv /bin/uv
+```
+- `uv sync --locked`: instala exactamente lo del `uv.lock`, y **falla** si el lock no está al día con el `pyproject.toml` (mejor fallar que instalar otra cosa).
+- `--no-install-project`: instala solo las dependencias, no el paquete `backend`. Es la mitad "lenta y estable" del truco de caché.
+- `--no-dev`: sin `ruff`, `pytest`… (para producción).
+- `--no-editable`: copia el paquete `backend` dentro del `.venv` en vez de enlazar a `src/`. Así la imagen final solo necesita el `.venv`.
+- `ENV PATH="/app/.venv/bin:$PATH"`: `uvicorn` y `python` son los del `.venv` sin escribir `uv run`.
+- `UV_LINK_MODE=copy`: la caché de uv está en otro mount y no se pueden hacer *hardlinks* entre ellos; sin esto uv da un aviso.
+
+#### Dockerfile multi-stage
+
+**Qué es:** un solo `Dockerfile` con varias etapas (`FROM ... AS nombre`). Cada etapa puede copiar cosas de otra (`COPY --from=etapa`). Con `--target` se elige cuál construir.
+
+```
+base ──┬── dev
+       └── builder ── prod
+```
+- **base**: `python:3.13-slim` + uv. Común a todas.
+- **dev**: dependencias de desarrollo + `uvicorn --reload`. Es la que usa Compose (`target: dev`).
+- **builder**: prepara el `.venv` de producción (sin dev, sin editable, con `.pyc` precompilados). Se descarta.
+- **prod**: parte de **otra** `python:3.13-slim` limpia y solo copia el `.venv` del builder.
+
+**Por qué la imagen de producción es más pequeña y segura:**
+- No lleva uv, ni cachés, ni herramientas de desarrollo, ni el código fuente suelto: solo lo necesario para ejecutar.
+- Menos cosas instaladas = menos superficie de ataque y menos vulnerabilidades que parchear.
+- Corre con un usuario sin privilegios (`USER app`), no como root.
+- Comparación real: `dev` ≈ 347 MB, `prod` ≈ 234 MB (la mayor parte es la propia imagen de Python).
+
+**Construir cada una a mano** (Compose lo hace solo con la de dev):
+```bash
+docker build --target dev  -t gastos-api:dev  backend/
+docker build --target prod -t gastos-api:prod backend/
+```
+
+**`CMD` de producción:**
+```dockerfile
+CMD ["sh", "-c", "exec uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+```
+- Cloud Run dice en qué puerto escuchar con la variable `PORT`. `${PORT:-8000}` usa 8000 si no existe.
+- Hace falta `sh -c` para que se expanda la variable (la forma `["uvicorn", ...]` no expande nada).
+- `exec` hace que uvicorn **sustituya** al shell: así recibe él la señal de parada (`SIGTERM`) y se apaga limpiamente.
+- `--host 0.0.0.0`: dentro de un contenedor hay que escuchar en todas las interfaces. Con `127.0.0.1` (lo de por defecto) solo se aceptarían conexiones desde dentro del propio contenedor.
+
+#### `.dockerignore`
+- Al hacer `docker build`, Docker envía la carpeta entera (el **contexto**) al motor. `.dockerignore` excluye cosas, igual que `.gitignore`.
+- Fuera:
+  - `.env`: los secretos llegan por variables de entorno, nunca dentro de la imagen.
+  - `.venv/`: es el del host, con rutas y binarios que no sirven dentro del contenedor.
+  - cachés y `__pycache__`.
+- Va junto al `Dockerfile`, en la raíz del contexto (`backend/`).
+
+#### `docker-compose.yml`
+
+**Qué es:** describe varios contenedores (servicios) y cómo se relacionan, para levantarlos juntos. Va en la raíz del repo porque orquesta piezas de varias carpetas.
+
+```yaml
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: gastos
+      POSTGRES_PASSWORD: gastos
+      POSTGRES_DB: gastos
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gastos -d gastos"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./backend
+      target: dev
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg://gastos:gastos@db:5432/gastos
+      ENVIRONMENT: development
+    volumes:
+      - ./backend/src:/app/src
+    depends_on:
+      db:
+        condition: service_healthy
+
+  adminer:
+    image: adminer
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db
+
+volumes:
+  pgdata:
+```
+- `ports: "HOST:CONTENEDOR"` publica un puerto del contenedor en el host. `5432` se publica para poder conectar desde fuera (uvicorn local, tests, un cliente SQL).
+- Las variables de `environment` tienen prioridad sobre el `.env` (pydantic-settings lee primero el entorno).
+- Las credenciales `gastos/gastos` son solo para local. En la nube irán en Secret Manager.
+- **Adminer** → `http://localhost:8080`. Sistema: PostgreSQL, Servidor: `db`, Usuario/Contraseña/BD: `gastos`.
+
+#### Bind mount vs. volumen nombrado
+
+| | Bind mount | Volumen nombrado |
+|---|---|---|
+| Sintaxis | `./backend/src:/app/src` | `pgdata:/var/...` |
+| Dónde vive | Carpeta tuya del host | La gestiona Docker |
+| Para qué | Código en desarrollo | Datos (la BD) |
+
+- **Bind mount**: el contenedor ve tu carpeta real. Lo que guardas en el editor aparece al instante dentro → `--reload` lo detecta y reinicia.
+- **Volumen nombrado**: Docker lo guarda aparte (`docker volume ls`). Sobrevive a que se borre el contenedor, por eso los datos de Postgres no se pierden con `down`.
+- Solo se monta `src/`, **no** todo `backend/`: si no, el `.venv` del host taparía el `.venv` del contenedor, y el del host no funciona dentro (rutas y Python distintos).
+- En `dev` se pone `PYTHONDONTWRITEBYTECODE=1`: el contenedor corre como root y, sin esto, crearía carpetas `__pycache__` de root dentro de tu `src/`.
+
+#### Redes en Compose: `db` y no `localhost`
+- Compose crea una red privada para el proyecto y mete en ella todos los servicios.
+- En esa red hay un DNS interno: **cada servicio se alcanza por su nombre**. Desde `api`, Postgres está en `db:5432`.
+- `localhost` dentro de un contenedor es **el propio contenedor**. Desde `api`, `localhost:5432` no tiene nada.
+- Por eso hay dos URLs:
+  - uvicorn en local (fuera de Docker) → `.env` con `localhost:5432` (usa el puerto publicado).
+  - API dentro de Compose → `environment` con `db:5432`.
+- El puerto interno (`5432` en `db:5432`) es el del contenedor; el `ports:` solo hace falta para entrar **desde el host**.
+
+#### `healthcheck` + `depends_on`
+- `depends_on: [db]` solo espera a que el contenedor de `db` **arranque**, no a que Postgres esté listo. Postgres tarda unos segundos en aceptar conexiones.
+- El `healthcheck` ejecuta `pg_isready` cada 5 s. Cuando responde bien, el servicio pasa a `healthy`.
+- `condition: service_healthy` hace que `api` no arranque hasta entonces. Se ve en `docker compose ps` → `Up (healthy)`.
+
+#### Comandos del día a día
+Desde la raíz del repo:
+```bash
+docker compose up -d           # levantar en 2.º plano
+docker compose up -d --build   # ídem, reconstruyendo la imagen
+docker compose ps              # estado de los servicios
+docker compose logs -f api     # seguir logs (Ctrl+C sale)
+docker compose exec api bash   # shell dentro del contenedor
+docker compose exec db psql -U gastos   # consola SQL
+docker compose restart api     # reiniciar un servicio
+docker compose down            # parar y borrar contenedores
+docker compose down -v         # ídem + borrar volúmenes
+```
+- `--build` hace falta al cambiar el `Dockerfile` o las dependencias (`uv add`). Los cambios en `.py` **no** lo necesitan: llegan por el bind mount.
+- `exec` entra en un contenedor que ya está corriendo. `run` crea uno nuevo (útil para tareas puntuales).
+
+**`down` vs. `down -v`:**
+- `down` borra contenedores y la red, pero **conserva los volúmenes**: al volver a hacer `up`, la BD sigue con sus datos.
+- `down -v` borra también los volúmenes: **se pierden los datos** de Postgres. Útil para empezar de cero.
+- Comprobar: `docker volume ls` muestra `gastos_python_react_pgdata` tras `down`, pero no tras `down -v`.
+
+#### Problemas típicos
+- **`port is already allocated`**: algo del host ya usa ese puerto (p. ej. un `uvicorn` local en el 8000). Pararlo, o cambiar el puerto del host en `ports:`.
+- **Añadí una dependencia y la API no la encuentra**: falta reconstruir → `docker compose up -d --build`.
+- **No recarga al guardar**: comprobar en `logs -f api` que sale `Will watch for changes` y que el fichero está dentro de `src/` (lo único montado).

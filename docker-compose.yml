@@ -1,0 +1,64 @@
+# Entorno de desarrollo local: PostgreSQL + API (+ Adminer).
+#   docker compose up -d        arrancar en segundo plano (añade --build si cambias Dockerfile o dependencias)
+#   docker compose logs -f api  seguir los logs de la API
+#   docker compose down         parar y borrar contenedores (los datos de la BD se conservan)
+#   docker compose down -v      ídem + borrar volúmenes (¡se pierden los datos!)
+#
+# Las credenciales de aquí son solo para desarrollo local; en la nube irán en Secret Manager.
+
+services:
+  # --- Base de datos ---
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: gastos
+      POSTGRES_PASSWORD: gastos
+      POSTGRES_DB: gastos
+    ports:
+      # Publicado en el host para conectar desde fuera de Compose
+      # (uvicorn local, tests, un cliente SQL...) con localhost:5432.
+      - "5432:5432"
+    volumes:
+      # Volumen nombrado: Docker lo gestiona y sobrevive a `down` (no a `down -v`).
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # `pg_isready` responde OK solo cuando Postgres ya acepta conexiones,
+      # que es bastante después de que el contenedor haya "arrancado".
+      test: ["CMD-SHELL", "pg_isready -U gastos -d gastos"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # --- API (FastAPI) ---
+  api:
+    build:
+      context: ./backend
+      target: dev
+    ports:
+      - "8000:8000"
+    environment:
+      # Dentro de la red de Compose, cada servicio se alcanza por su nombre: el host es `db`.
+      # (`localhost` aquí sería el propio contenedor de la API, donde no hay Postgres.)
+      # Estas variables tienen prioridad sobre cualquier .env.
+      DATABASE_URL: postgresql+psycopg://gastos:gastos@db:5432/gastos
+      ENVIRONMENT: development
+    volumes:
+      # Bind mount: tu carpeta src/ del host aparece en /app/src del contenedor.
+      # Al guardar un .py, uvicorn --reload lo detecta y reinicia.
+      # Solo se monta src/ (no todo backend/) para no tapar el .venv del contenedor con el del host.
+      - ./backend/src:/app/src
+    depends_on:
+      db:
+        condition: service_healthy # espera al healthcheck, no solo a que el contenedor exista
+
+  # --- Adminer: cliente web para ver la BD (opcional) ---
+  # http://localhost:8080 -> Sistema: PostgreSQL, Servidor: db, Usuario/Contraseña/BD: gastos
+  adminer:
+    image: adminer
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db
+
+volumes:
+  pgdata:

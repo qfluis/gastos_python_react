@@ -77,13 +77,13 @@
 - Por qué separar **modelos de BD** (SQLAlchemy) de **esquemas de API** (Pydantic)
 
 ### B4. Docker en desarrollo
-- [ ] Escribir `backend/Dockerfile` **multi-stage** con targets `dev` y `prod`
-- [ ] Crear `.dockerignore`
-- [ ] Crear `docker-compose.yml` con servicios:
-  - [ ] `db` → `postgres:17` con volumen persistente
-  - [ ] `api` → build target `dev`, bind mount del código, `--reload`
-  - [ ] (Opcional) `adminer` para ver la BD desde el navegador
-- [ ] Añadir `healthcheck` a `db` y `depends_on: condition: service_healthy` en `api`
+- [X] Escribir `backend/Dockerfile` **multi-stage** con targets `dev` y `prod`
+- [X] Crear `.dockerignore`
+- [X] Crear `docker-compose.yml` con servicios:
+  - [X] `db` → `postgres:17` con volumen persistente
+  - [X] `api` → build target `dev`, bind mount del código, `--reload`
+  - [X] (Opcional) `adminer` para ver la BD desde el navegador
+- [X] Añadir `healthcheck` a `db` y `depends_on: condition: service_healthy` en `api`
 - [ ] Comprobar que al guardar un `.py` el contenedor recarga
 - [ ] Practicar comandos: `up`, `down`, `logs -f`, `exec`, `down -v`
 
