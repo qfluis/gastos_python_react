@@ -709,3 +709,45 @@ with engine.connect() as conn:
 ```bash
 docker compose up -d --build
 ```
+
+#### `engine`, `Session` y `get_db()`
+Código en `src/backend/db/session.py`. Es la "fontanería" entre FastAPI y Postgres, todavía sin modelos ni tablas.
+
+| Pieza | Qué es | Cuántas hay | Vida |
+|---|---|---|---|
+| `engine` | **Pool de conexiones** a Postgres (usa psycopg por debajo). Al crearse no conecta: abre conexiones cuando se le piden. | 1 por proceso | Toda la vida de la app |
+| `SessionLocal` | **Fábrica** de sesiones (`sessionmaker`) atada al engine. `SessionLocal()` → una `Session` nueva. | 1 | Toda la vida de la app |
+| `Session` | **Unidad de trabajo**: toma una conexión del pool, lleva la transacción (`commit()` / `rollback()`) y sigue los objetos cargados/añadidos. | 1 por petición HTTP | Lo que dura la petición |
+| `get_db()` | **Dependencia** de FastAPI (generador con `yield`): abre la sesión, se la da al endpoint y la cierra al acabar, pase lo que pase. | — | — |
+
+```
+GET /gastos ──► FastAPI ve Depends(get_db)
+              ──► get_db(): db = SessionLocal()   (pide conexión al pool)
+              ──► yield db → el endpoint la usa
+              ──► al salir del `with`: db.close() (devuelve la conexión al pool)
+```
+
+**Opciones elegidas:**
+- `echo=settings.db_echo` → con `DB_ECHO=true` se ve en consola todo el SQL generado. En Compose está activado: `docker compose logs -f api`.
+- `pool_pre_ping=True` → antes de reutilizar una conexión del pool hace una comprobación; si Postgres la cerró (reinicio, timeout en Cloud SQL) la descarta en vez de fallar.
+- `autoflush=False` → los cambios se mandan a la BD al hacer `commit()`/`flush()`, no "por sorpresa" antes de cada consulta.
+- `expire_on_commit=False` → tras `commit()` el objeto conserva sus datos y se puede devolver como respuesta sin otra consulta.
+
+**Uso en un endpoint** (alias `DbSession = Annotated[Session, Depends(get_db)]`):
+```python
+@router.get("/health/db")
+def health_db(db: DbSession) -> dict[str, str]:
+    db.execute(text("SELECT 1"))
+    return {"database": "ok"}
+```
+Con `DB_ECHO=true` se ve:
+```
+BEGIN (implicit)   ← SQLAlchemy abre la transacción sola al primer uso
+SELECT 1
+ROLLBACK           ← al cerrar la sesión sin commit(), se deshace todo
+```
+→ **sin `commit()` no se guarda nada**. Al escribir datos (B6) habrá que llamar a `db.commit()` explícitamente.
+
+**Por qué `def` y no `async def`:** SQLAlchemy + psycopg se usan aquí en modo síncrono (bloqueante). FastAPI ejecuta las dependencias y endpoints `def` en un hilo aparte, así que no bloquean el servidor.
+
+**Sustituir la dependencia en tests:** `app.dependency_overrides[get_db] = otra_funcion` hace que FastAPI use otra sesión (falsa o contra una BD de pruebas) sin tocar el código de los endpoints. Ver `tests/test_db.py`.

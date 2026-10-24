@@ -95,8 +95,8 @@
 - Qué pasa con los datos al hacer `down` vs `down -v`
 
 ### B5. Base de datos: SQLAlchemy + Alembic
-- [ ] Añadir `sqlalchemy`, `psycopg[binary]`, `alembic`
-- [ ] Crear `engine`, `SessionLocal` y dependencia `get_db()` para FastAPI
+- [X] Añadir `sqlalchemy`, `psycopg[binary]`, `alembic`
+- [X] Crear `engine`, `SessionLocal` y dependencia `get_db()` para FastAPI
 - [ ] Definir modelos:
   - [ ] `Category` (id, nombre, color/icono)
   - [ ] `Expense` (id, importe, fecha, descripción, category_id, created_at)

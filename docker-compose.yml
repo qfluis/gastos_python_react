@@ -42,6 +42,7 @@ services:
       # Estas variables tienen prioridad sobre cualquier .env.
       DATABASE_URL: postgresql+psycopg://gastos:gastos@db:5432/gastos
       ENVIRONMENT: development
+      DB_ECHO: "true" # ver en `docker compose logs -f api` el SQL que genera SQLAlchemy
     volumes:
       # Bind mount: tu carpeta src/ del host aparece en /app/src del contenedor.
       # Al guardar un .py, uvicorn --reload lo detecta y reinicia.

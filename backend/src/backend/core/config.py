@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     # Con valor por defecto -> opcional. Literal limita los valores válidos.
     environment: Literal["development", "test", "production"] = "development"
 
+    # Si es True, SQLAlchemy imprime en consola cada sentencia SQL que ejecuta.
+    db_echo: bool = False
+
 
 @lru_cache
 def get_settings() -> Settings:
