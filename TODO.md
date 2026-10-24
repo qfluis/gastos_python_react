@@ -38,8 +38,8 @@
 - [X] Añadir dependencias: `fastapi`, `uvicorn[standard]`
 - [X] Crear `src/backend/main.py` con un endpoint `GET /health`
 - [X] Arrancar con `uv run uvicorn backend.main:app --reload` (desde `backend/`)
-- [ ] Explorar la documentación automática en `/docs` (Swagger) y `/redoc`
-- [ ] Ver el esquema crudo en `/openapi.json`
+- [X] Explorar la documentación automática en `/docs` (Swagger) y `/redoc`
+- [X] Ver el esquema crudo en `/openapi.json`
 
 🎓 **Entender**
 - `pyproject.toml` y `uv.lock`: qué es cada uno y por qué el lock va a git
@@ -48,10 +48,10 @@
 - ¿Qué es OpenAPI y por qué FastAPI lo genera solo?
 
 ### B2. Calidad de código
-- [ ] Añadir `ruff` como dependencia de desarrollo (`uv add --dev ruff`)
-- [ ] Configurar reglas de ruff en `pyproject.toml`
-- [ ] Añadir `pytest` + `httpx` y escribir un test para `/health`
-- [ ] (Opcional) `pre-commit` para ejecutar ruff antes de cada commit
+- [X] Añadir `ruff` como dependencia de desarrollo (`uv add --dev ruff`)
+- [X] Configurar reglas de ruff en `pyproject.toml`
+- [X] Añadir `pytest` + `httpx` y escribir un test para `/health` (al final `httpx2`: Starlette ya depreca `httpx`)
+- [X] (Opcional) `pre-commit` para ejecutar ruff antes de cada commit
 
 🎓 **Entender**
 - Dependencias de producción vs. de desarrollo

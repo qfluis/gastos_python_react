@@ -18,3 +18,46 @@ backend = "backend:main"
 [build-system]
 requires = ["uv_build>=0.13.5,<0.14.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.16.0",
+    "pre-commit>=4.7.0",
+    "pytest>=9.1.1",
+    "ruff>=0.17.2",
+]
+
+# --- Ruff: linter + formateador ---
+[tool.ruff]
+line-length = 88          # igual que Black (estándar de facto)
+target-version = "py313"  # coincide con requires-python
+src = ["src"]             # para que ordene bien los imports propios (backend.*)
+
+[tool.ruff.lint]
+select = [
+    "E", "W",  # pycodestyle: errores y avisos de estilo (PEP 8)
+    "F",       # Pyflakes: imports sin usar, variables no definidas...
+    "I",       # isort: orden de imports
+    "N",       # pep8-naming: convenciones de nombres
+    "UP",      # pyupgrade: sintaxis moderna de Python (list[str], X | None...)
+    "B",       # flake8-bugbear: bugs típicos (argumentos mutables por defecto...)
+    "SIM",     # flake8-simplify: código que se puede simplificar
+    "C4",      # flake8-comprehensions: comprehensions más limpias
+    "RUF",     # reglas propias de Ruff
+    "FAST",    # reglas específicas de FastAPI
+]
+ignore = [
+    "E501",    # longitud de línea: ya la gestiona el formateador
+]
+
+[tool.ruff.lint.flake8-bugbear]
+# Permite `def endpoint(db = Depends(get_db))` sin que B008 se queje
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "fastapi.Body"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+# --- Pytest ---
+[tool.pytest.ini_options]
+testpaths = ["tests"]   # dónde buscar tests (más rápido y evita recoger .venv)
+addopts = "-ra"         # resumen al final de tests saltados/fallidos

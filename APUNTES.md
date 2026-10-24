@@ -196,3 +196,6 @@ uv run uvicorn backend.main:app --reload
 - `http://127.0.0.1:8000/openapi.json` → esquema OpenAPI en crudo
 
 **VS Code:** `Ctrl+Shift+P` → *Python: Select Interpreter* → `backend/.venv/bin/python`, para que Pylance reconozca `fastapi`.
+
+### Calidad del código
+

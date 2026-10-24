@@ -1,0 +1,13 @@
+# Hooks que se ejecutan automáticamente antes de cada `git commit`.
+# Va en la raíz del repo porque git (y pre-commit) trabajan a nivel de repositorio,
+# no de carpeta. Instalar una vez con: `cd backend && uv run pre-commit install`
+repos:
+  # --- Ruff (backend) ---
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.2 # mantener igual que la versión de ruff en backend/uv.lock
+    hooks:
+      - id: ruff-check
+        args: [--fix] # arregla lo que pueda; si cambia algo, el commit se para para que lo revises
+        files: ^backend/
+      - id: ruff-format
+        files: ^backend/
