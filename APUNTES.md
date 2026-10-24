@@ -1,4 +1,4 @@
-# Apuntes
+# Puesta en marcha entorno
 
 ## Python
 
@@ -131,3 +131,5 @@ code --install-extension ms-azuretools.vscode-docker
 ```
 - También desde la vista de extensiones (`Ctrl+Shift+X`) buscando el nombre o el ID.
 - Comprobar: `code --list-extensions`
+
+# Backend

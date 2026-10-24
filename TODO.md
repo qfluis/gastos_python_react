@@ -22,7 +22,7 @@
   docker-compose.yml
   TODO.md
   ```
-- [ ] Crear `.gitignore` (Python, Node, `.env`, `.venv`, `node_modules`, `dist`)
+- [X] Crear `.gitignore` (Python, Node, `.env`, `.venv`, `node_modules`, `dist`)
 
 🎓 **Entender**
 - ¿Qué es un entorno virtual y por qué cada proyecto Python tiene el suyo?
