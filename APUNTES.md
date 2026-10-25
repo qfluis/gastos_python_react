@@ -833,3 +833,62 @@ CREATE TABLE expenses (
 )
 ```
 Tests sin BD que comprueban la definición: `tests/test_models.py`.
+
+#### Alembic: `init` y `env.py`
+**Objetivo:** dejar Alembic montado y conectado a la config y a los modelos. Todavía **sin migraciones** (eso es el siguiente paso).
+
+```bash
+uv run alembic init alembic   # desde backend/, plantilla "generic"
+```
+Crea:
+```
+backend/
+├── alembic.ini          # configuración: dónde están las migraciones, logging, hooks
+└── alembic/
+    ├── env.py           # código Python que se ejecuta en CADA comando de Alembic
+    ├── script.py.mako   # plantilla con la que se genera cada fichero de migración
+    ├── README
+    └── versions/        # aquí irán las migraciones (vacía; .gitkeep para versionarla)
+```
+
+**Cómo funciona un comando de Alembic:**
+```
+alembic <comando>
+  └─ lee alembic.ini           → script_location, file_template, logging, hooks
+  └─ ejecuta alembic/env.py    → decide la URL y el target_metadata
+       ├─ online (lo normal): crea un engine, conecta y ejecuta
+       └─ offline (--sql):    no conecta, imprime el SQL
+  └─ alembic/versions/*.py     → cada migración: revision, down_revision, upgrade(), downgrade()
+```
+- Las migraciones forman una **cadena**: cada una apunta a la anterior con `down_revision`. `head` = la última.
+- En la BD, Alembic usa la tabla **`alembic_version`** (una fila con la revisión aplicada) para saber qué falta. La crea vacía la primera vez que conecta (basta con `alembic current`).
+- `--autogenerate` compara `target_metadata` (los modelos) con la BD real y escribe un **borrador**: no detecta todo (p. ej. renombrados → los ve como borrar + crear), por eso se revisa a mano.
+
+**`env.py`: las dos conexiones con la app:**
+```python
+import backend.models  # noqa: F401   → registra los modelos en Base.metadata
+target_metadata = Base.metadata       # catálogo con el que compara --autogenerate
+DATABASE_URL = get_settings().database_url   # la misma URL que usa la API
+```
+- **URL desde la config, no desde `alembic.ini`**: se quitó `sqlalchemy.url` del `.ini`. Así no hay credenciales en un fichero versionado y en la nube basta con la variable de entorno (12-Factor).
+- No se usa `config.set_main_option("sqlalchemy.url", ...)`: el `.ini` interpreta los `%` y una contraseña con `%` rompería.
+- **`import backend.models`**: si un modelo no se importa, no está en `Base.metadata` y autogenerate propondría **borrar** su tabla.
+- **Engine propio con `NullPool`** en vez del de `db/session.py`: Alembic es un proceso corto (conecta, migra, termina); no tiene sentido un pool.
+- Cada migración va dentro de una **transacción**: en Postgres el DDL (`CREATE TABLE`...) también es transaccional, si algo falla a mitad se deshace entera.
+
+**Ajustes en `alembic.ini`:**
+- `file_template` con fecha → `2026_10_25_1130-<rev>_<mensaje>.py`: los ficheros se ordenan cronológicamente.
+- `[post_write_hooks]` → cada migración generada pasa por `ruff check --fix` + `ruff format` (cumple las reglas y el pre-commit no protesta).
+
+**Desde dónde lanzarlo:** desde el **host**, en `backend/`: `uv run alembic ...` → conecta a `localhost:5432` (URL del `.env`). Dentro del contenedor de la API funcionaría, pero el bind mount solo trae `src/`: una migración generada allí **no aparecería** en tu carpeta.
+
+**Comandos útiles:**
+```bash
+uv run alembic current         # revisión aplicada en la BD (nada si no hay ninguna)
+uv run alembic history         # cadena de migraciones
+uv run alembic check           # ¿hay diferencias entre modelos y BD? (sale con error si las hay)
+uv run alembic upgrade head --sql   # modo offline: ver el SQL sin ejecutarlo
+```
+Ahora mismo `alembic check` responde *"New upgrade operations detected: add_table categories, cost_centers, expenses..."* → prueba de que `env.py` ve los modelos y la BD aún no tiene sus tablas.
+
+**Pendiente para D3:** la imagen `prod` solo copia el `.venv`; para el Cloud Run Job de migraciones habrá que copiar también `alembic.ini` y `alembic/`.

@@ -101,7 +101,7 @@
   - [X] `Category` (id, nombre, color)
   - [X] `CostCenter` (id, nombre)
   - [X] `Expense` (id, importe, fecha, descripción, category_id, cost_center_id, created_at)
-- [ ] `alembic init` y configurar `env.py` para leer la URL de config
+- [X] `alembic init` y configurar `env.py` para leer la URL de config
 - [ ] Generar primera migración con `--autogenerate` y **revisarla a mano**
 - [ ] Aplicar con `alembic upgrade head` y comprobar las tablas en Adminer
 - [ ] Practicar: añadir un campo, generar migración, hacer `downgrade`
