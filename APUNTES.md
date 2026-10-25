@@ -892,3 +892,83 @@ uv run alembic upgrade head --sql   # modo offline: ver el SQL sin ejecutarlo
 Ahora mismo `alembic check` responde *"New upgrade operations detected: add_table categories, cost_centers, expenses..."* → prueba de que `env.py` ve los modelos y la BD aún no tiene sus tablas.
 
 **Pendiente para D3:** la imagen `prod` solo copia el `.venv`; para el Cloud Run Job de migraciones habrá que copiar también `alembic.ini` y `alembic/`.
+
+#### Alembic: primera migración (`--autogenerate`)
+**Objetivo:** generar la migración que crea `categories`, `cost_centers` y `expenses`, y **leerla entera** antes de aplicarla. Aquí todavía no se toca la BD (eso es `upgrade head`, el paso siguiente).
+
+```bash
+uv run alembic current    # vacío → ninguna revisión aplicada
+uv run alembic check      # "New upgrade operations detected: add_table ..." → hay diferencias
+uv run alembic revision --autogenerate -m "tablas iniciales"
+```
+Qué hace `revision --autogenerate`:
+1. `env.py` importa `backend.models` → las tablas quedan en `Base.metadata`.
+2. Conecta a la BD, la **inspecciona** y calcula la diferencia con los modelos.
+3. Escribe esa diferencia rellenando `script.py.mako` → `alembic/versions/2026_10_25_1124-3164f9e00e5c_tablas_iniciales.py`.
+4. Pasa los `post_write_hooks` (ruff). En la primera migración `Revises:` sale vacío con un espacio al final; `ruff check` lo marca y `ruff format` lo quita.
+
+Hay que partir de una BD **sin** las tablas: autogenerate escribe solo la diferencia. Si antes se hubiera hecho un `create_all()`, la migración saldría vacía.
+
+**El fichero generado (resumido):**
+```python
+revision = "3164f9e00e5c"
+down_revision = None            # primera de la cadena
+
+def upgrade() -> None:
+    op.create_table("categories", ...)     # primero las tablas "1"...
+    op.create_table("cost_centers", ...)
+    op.create_table(
+        "expenses",                        # ...después la que tiene las FK
+        sa.Column("amount", sa.Numeric(precision=12, scale=2), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True),
+                  server_default=sa.text("now()"), nullable=False),
+        sa.CheckConstraint("amount > 0", name=op.f("ck_expenses_amount_positive")),
+        sa.ForeignKeyConstraint(["category_id"], ["categories.id"],
+                                name=op.f("fk_expenses_category_id_categories"),
+                                ondelete="RESTRICT"),
+        ...
+    )
+    op.create_index(op.f("ix_expenses_date"), "expenses", ["date"], unique=False)
+    ...
+
+def downgrade() -> None:              # lo mismo al revés
+    op.drop_index(...)
+    op.drop_table("expenses")         # primero la que apunta a las otras
+    op.drop_table("cost_centers")
+    op.drop_table("categories")
+```
+
+**Checklist de revisión** (contra los modelos):
+- `down_revision = None` en la primera; en las siguientes, la revisión anterior.
+- **Orden**: las tablas referenciadas van antes que las que tienen la FK; en `downgrade()`, al revés.
+- **Tipos y NULL**: `Numeric(12, 2)` para el dinero; `nullable=True` solo donde el modelo dice `| None`.
+- **Nombres**: todos los constraints e índices con nombre de la naming convention y envueltos en `op.f()`. `op.f()` = "este nombre ya es el definitivo, no le apliques otra vez la convención".
+- `ondelete`, `CheckConstraint` y `server_default` presentes.
+- **Ningún `drop_table`/`drop_column` inesperado**: es la señal de un modelo sin importar o de un renombrado.
+- Si algo no cuadra **y la migración aún no está aplicada**: se corrige el modelo, se borra el fichero y se regenera.
+
+**Lo que autogenerate no detecta (o detecta mal):**
+- **Renombrados** de tabla/columna → los ve como borrar + crear = **pérdida de datos**. Se cambia a mano por `op.rename_table` / `op.alter_column(..., new_name=...)`.
+- Cambios en un `CheckConstraint` de una tabla que ya existe.
+- Cambios de `server_default` (no los compara por defecto).
+- **Datos**: rellenar o transformar filas se escribe a mano (`op.execute(...)`).
+
+**Ver el SQL sin ejecutarlo** (modo offline):
+```bash
+uv run alembic upgrade head --sql
+uv run alembic history     # <base> -> 3164f9e00e5c (head), tablas iniciales
+```
+```sql
+CREATE TABLE expenses (
+    id SERIAL NOT NULL,                                     -- Integer + PK → autoincremento
+    amount NUMERIC(12, 2) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    CONSTRAINT ck_expenses_amount_positive CHECK (amount > 0),
+    CONSTRAINT fk_expenses_category_id_categories FOREIGN KEY(category_id)
+        REFERENCES categories (id) ON DELETE RESTRICT,
+    ...
+);
+CREATE INDEX ix_expenses_date ON expenses (date);
+INSERT INTO alembic_version (version_num) VALUES ('3164f9e00e5c');  -- así "recuerda" qué hay aplicado
+```
+Todo va entre `BEGIN;` y `COMMIT;`: si falla algo, no se queda a medias.
