@@ -2,7 +2,8 @@
 # requires-python = ">=3.13"
 # dependencies = ["markdown"]
 # ///
-"""Genera APUNTES.epub y APUNTES.azw3 (Kindle) a partir de APUNTES.md.
+"""Genera APUNTES.epub y APUNTES.azw3 (Kindle) a partir de APUNTES.md y,
+como anexo al final, CODIGO.md.
 
 Uso (desde la raíz del repo):
     uv run scripts/apuntes_ebook.py
@@ -10,6 +11,7 @@ Uso (desde la raíz del repo):
 Necesita Calibre instalado (`ebook-convert`): sudo apt install calibre
 """
 
+import re
 import shutil
 import subprocess
 import sys
@@ -20,6 +22,7 @@ import markdown
 
 RAIZ = Path(__file__).resolve().parent.parent
 ENTRADA = RAIZ / "APUNTES.md"
+ANEXO = RAIZ / "CODIGO.md"
 SALIDA = RAIZ / "APUNTES.epub"
 # AZW3 (KF8): formato actual de Kindle para copiar por USB. MOBI es el antiguo.
 SALIDA_KINDLE = RAIZ / "APUNTES.azw3"
@@ -43,15 +46,32 @@ th { background: #e6e6e6; }
 """
 
 
+def a_html(texto: str, nivel_base: int = 1) -> str:
+    """Markdown -> HTML (tablas y bloques ``` incluidos).
+
+    `nivel_base` desplaza los títulos: con 2, `#` sale como <h2>, `##` como <h3>...
+    """
+    return markdown.markdown(
+        texto,
+        extensions=["tables", "fenced_code", "sane_lists", "toc"],
+        extension_configs={"toc": {"baselevel": nivel_base}},
+    )
+
+
 def main() -> None:
     if shutil.which("ebook-convert") is None:
         sys.exit("Falta `ebook-convert`. Instala Calibre: sudo apt install calibre")
 
-    # 1. Markdown -> HTML (tablas y bloques ``` incluidos)
-    cuerpo = markdown.markdown(
-        ENTRADA.read_text(encoding="utf-8"),
-        extensions=["tables", "fenced_code", "sane_lists"],
-    )
+    # 1. Markdown -> HTML
+    cuerpo = a_html(ENTRADA.read_text(encoding="utf-8"))
+
+    # Anexo: CODIGO.md con los títulos un nivel más abajo, para que en el índice
+    # sea un solo capítulo (h2) con sus secciones (h3) y ficheros (h4) dentro.
+    if ANEXO.exists():
+        anexo = ANEXO.read_text(encoding="utf-8")
+        anexo = re.sub(r"^# ", "# Anexo · ", anexo, count=1, flags=re.MULTILINE)
+        cuerpo += a_html(anexo, nivel_base=2)
+
     html = (
         '<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">'
         f"<title>Apuntes</title><style>{CSS}</style></head><body>{cuerpo}</body></html>"
