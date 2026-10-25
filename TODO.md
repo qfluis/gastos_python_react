@@ -97,9 +97,10 @@
 ### B5. Base de datos: SQLAlchemy + Alembic
 - [X] Añadir `sqlalchemy`, `psycopg[binary]`, `alembic`
 - [X] Crear `engine`, `SessionLocal` y dependencia `get_db()` para FastAPI
-- [ ] Definir modelos:
-  - [ ] `Category` (id, nombre, color/icono)
-  - [ ] `Expense` (id, importe, fecha, descripción, category_id, created_at)
+- [X] Definir modelos:
+  - [X] `Category` (id, nombre, color)
+  - [X] `CostCenter` (id, nombre)
+  - [X] `Expense` (id, importe, fecha, descripción, category_id, cost_center_id, created_at)
 - [ ] `alembic init` y configurar `env.py` para leer la URL de config
 - [ ] Generar primera migración con `--autogenerate` y **revisarla a mano**
 - [ ] Aplicar con `alembic upgrade head` y comprobar las tablas en Adminer

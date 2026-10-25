@@ -751,3 +751,85 @@ ROLLBACK           ← al cerrar la sesión sin commit(), se deshace todo
 **Por qué `def` y no `async def`:** SQLAlchemy + psycopg se usan aquí en modo síncrono (bloqueante). FastAPI ejecuta las dependencias y endpoints `def` en un hilo aparte, así que no bloquean el servidor.
 
 **Sustituir la dependencia en tests:** `app.dependency_overrides[get_db] = otra_funcion` hace que FastAPI use otra sesión (falsa o contra una BD de pruebas) sin tocar el código de los endpoints. Ver `tests/test_db.py`.
+
+#### Modelos
+Código en `src/backend/db/base.py` (la `Base`) y `src/backend/models/` (un fichero por tabla). Un **modelo** es una clase Python que describe una tabla; aquí todavía **no se crea ninguna tabla**, eso lo hará Alembic.
+
+```
+categories (1) ──< expenses >── (1) cost_centers
+  id                id               id
+  name (único)      amount           name (único)
+  color?            date
+                    description?
+                    category_id    → categories.id
+                    cost_center_id → cost_centers.id
+                    created_at
+```
+(`?` = admite NULL. Cada gasto tiene **una** categoría y **un** centro de coste; cada categoría/centro tiene **muchos** gastos → dos relaciones 1-N.)
+
+**`Base` y el `metadata`:**
+- Todos los modelos heredan de `Base(DeclarativeBase)`. Al definir una subclase, su tabla se registra en `Base.metadata`: el **catálogo** de tablas que Alembic compara con la BD real para generar migraciones.
+- `models/__init__.py` importa los tres modelos → basta `import backend.models` para que estén todos registrados (si un modelo no se importa nunca, Alembic "no lo ve").
+
+**Sintaxis SQLAlchemy 2.x: `Mapped` + `mapped_column`:**
+```python
+name: Mapped[str] = mapped_column(String(50), unique=True)   # NOT NULL
+color: Mapped[str | None] = mapped_column(String(7))           # NULL permitido
+```
+- El **tipo Python** (`Mapped[...]`) dice qué devuelve el atributo y, con `| None`, si la columna es `nullable`.
+- `mapped_column(...)` añade el detalle de BD: tipo SQL (`String(50)`), `unique`, `index`, `ForeignKey`, defaults...
+- `primary_key=True` en un `int` → Postgres lo genera solo (`SERIAL`).
+
+**Dinero: `Numeric`, nunca `Float`:**
+```python
+>>> 0.1 + 0.2
+0.30000000000000004          # float: binario, aproximado
+>>> Decimal("0.1") + Decimal("0.2")
+Decimal('0.3')               # Decimal: exacto
+```
+`amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))` → hasta 12 dígitos, 2 de ellos decimales (máx. 9.999.999.999,99). Postgres guarda el número exacto y SQLAlchemy lo devuelve como `Decimal`.
+
+**Relaciones: `ForeignKey` + `relationship`:**
+| | Qué es | ¿Columna en la tabla? |
+|---|---|---|
+| `category_id = mapped_column(ForeignKey("categories.id"))` | La **clave foránea**: el número que enlaza la fila con su categoría. Postgres garantiza que exista. | Sí |
+| `category = relationship(back_populates="expenses")` | Atributo Python: `gasto.category` devuelve el objeto `Category` (SQLAlchemy hace la consulta). | No |
+| `expenses = relationship(back_populates="category")` (en `Category`) | El lado contrario: `categoria.expenses` → lista de gastos. | No |
+- `back_populates` conecta los dos lados: si haces `gasto.category = comida`, `comida.expenses` ya incluye ese gasto sin recargar.
+- Los modelos se nombran entre comillas (`Mapped["Category"]`) porque se importan unos a otros; el `if TYPE_CHECKING:` importa los tipos solo para el editor/ruff y evita el import circular.
+
+**Otras decisiones:**
+- `ondelete="RESTRICT"` → Postgres **rechaza** borrar una categoría o centro de coste que aún tenga gastos (la alternativa `CASCADE` borraría los gastos sin avisar).
+- `index=True` en `category_id`, `cost_center_id` y `date` → Postgres **no** crea índices en las FK automáticamente, y en B6 se filtrará por categoría y por rango de fechas.
+- `CheckConstraint("amount > 0")` → regla que comprueba la propia BD, aunque la API tuviera un fallo.
+- `created_at` con `server_default=func.now()` → el valor lo pone **Postgres** al insertar (`DEFAULT now()` en el SQL). Con `default=...` lo pondría Python y no quedaría en el esquema de la tabla.
+- `DateTime(timezone=True)` → `TIMESTAMP WITH TIME ZONE`: guarda el instante exacto, sin ambigüedad de zona horaria.
+- `import datetime as dt` en `expense.py` → el campo se llama `date` y así no tapa al tipo `dt.date`.
+
+**`naming_convention`:** en `Base.metadata` se define una plantilla de nombres para constraints e índices (`pk_expenses`, `fk_expenses_category_id_categories`, `ix_expenses_date`, `ck_expenses_amount_positive`...). Sin ella Postgres pone nombres propios y Alembic no sabría cómo se llama un constraint para borrarlo en un `downgrade`. Conviene ponerla **antes** de la primera migración.
+
+**Ver el SQL que generarían los modelos** (sin tocar la BD), desde `backend/`:
+```bash
+uv run python -c "
+from sqlalchemy.schema import CreateTable
+from sqlalchemy.dialects import postgresql
+import backend.models
+from backend.db.base import Base
+for t in Base.metadata.sorted_tables:
+    print(CreateTable(t).compile(dialect=postgresql.dialect()))
+"
+```
+Fragmento de la salida:
+```sql
+CREATE TABLE expenses (
+	id SERIAL NOT NULL,
+	amount NUMERIC(12, 2) NOT NULL,
+	...
+	created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+	CONSTRAINT pk_expenses PRIMARY KEY (id),
+	CONSTRAINT ck_expenses_amount_positive CHECK (amount > 0),
+	CONSTRAINT fk_expenses_category_id_categories FOREIGN KEY(category_id) REFERENCES categories (id) ON DELETE RESTRICT,
+	...
+)
+```
+Tests sin BD que comprueban la definición: `tests/test_models.py`.
